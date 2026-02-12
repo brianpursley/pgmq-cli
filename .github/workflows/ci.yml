@@ -1,0 +1,54 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Unit tests
+        run: make test-unit
+
+      - name: Vulnerability scan
+        run: make govulncheck
+
+  integration:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pgmq_version:
+          - v1.7.0
+          - v1.8.1
+          - v1.9.0
+          - v1.10.0
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: true
+
+      - name: Integration tests
+        env:
+          PGMQ_TEST_IMAGE: ghcr.io/pgmq/pg17-pgmq:${{ matrix.pgmq_version }}
+        run: make test-integration
