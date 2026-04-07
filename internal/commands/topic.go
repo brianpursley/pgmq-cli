@@ -51,3 +51,7 @@ func topicQueueSecondArgCompletion(cmd *cobra.Command, args []string, toComplete
 func topicCommandNotImplemented(name string) error {
 	return errs.NewError(errs.ExitError, fmt.Sprintf("%s not implemented yet", name))
 }
+
+func topicBindingNotFoundError(pattern, queue string) error {
+	return errs.NewNotFoundError(fmt.Sprintf("topic binding not found for pattern %q and queue %q", pattern, queue))
+}

@@ -16,7 +16,14 @@ limitations under the License.
 
 package commands
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/spf13/cobra"
+
+	"pgmq-cli/internal/errs"
+)
 
 func TestTopicSubcommandsRegisterExpectedChildren(t *testing.T) {
 	cmd := TopicCmd()
@@ -37,5 +44,36 @@ func TestTopicCommandsWireQueueCompletion(t *testing.T) {
 	}
 	if TopicListCmd().ValidArgsFunction == nil {
 		t.Fatalf("expected topic list to wire queue completion")
+	}
+}
+
+func TestTopicQueueSecondArgCompletionOnlyOnSecondArg(t *testing.T) {
+	cmd := &cobra.Command{Use: "bind"}
+
+	completions, directive := topicQueueSecondArgCompletion(cmd, nil, "")
+	if len(completions) != 0 {
+		t.Fatalf("expected no completions before second arg, got %v", completions)
+	}
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf("unexpected directive: %v", directive)
+	}
+
+	completions, directive = topicQueueSecondArgCompletion(cmd, []string{"pattern"}, "")
+	if len(completions) != 0 {
+		t.Fatalf("expected graceful empty completions without config, got %v", completions)
+	}
+	if directive != cobra.ShellCompDirectiveNoFileComp {
+		t.Fatalf("unexpected directive: %v", directive)
+	}
+}
+
+func TestTopicBindingNotFoundError(t *testing.T) {
+	err := topicBindingNotFoundError("logs.#", "audit")
+	assertExitCode(t, err, errs.ExitNotFound)
+	if !strings.Contains(err.Error(), `pattern "logs.#"`) {
+		t.Fatalf("expected pattern in error, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), `queue "audit"`) {
+		t.Fatalf("expected queue in error, got %q", err.Error())
 	}
 }

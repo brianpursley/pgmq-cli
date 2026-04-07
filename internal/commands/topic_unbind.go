@@ -16,7 +16,11 @@ limitations under the License.
 
 package commands
 
-import "github.com/spf13/cobra"
+import (
+	"context"
+
+	"github.com/spf13/cobra"
+)
 
 func TopicUnbindCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -32,5 +36,20 @@ func TopicUnbindCmd() *cobra.Command {
 }
 
 func runTopicUnbind(cmd *cobra.Command, pattern, queue string) error {
-	return topicCommandNotImplemented("topic unbind")
+	conn, _, err := connect(cmd)
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	defer conn.Close(ctx)
+
+	var removed bool
+	if err := conn.Conn.QueryRow(ctx, "SELECT pgmq.unbind_topic($1::text, $2::text);", pattern, queue).Scan(&removed); err != nil {
+		return dbErrorForTopic(err)
+	}
+	if !removed {
+		return topicBindingNotFoundError(pattern, queue)
+	}
+
+	return outputString(cmd, "topic unbound")
 }

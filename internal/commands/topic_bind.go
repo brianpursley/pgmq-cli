@@ -16,7 +16,11 @@ limitations under the License.
 
 package commands
 
-import "github.com/spf13/cobra"
+import (
+	"context"
+
+	"github.com/spf13/cobra"
+)
 
 func TopicBindCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -32,5 +36,17 @@ func TopicBindCmd() *cobra.Command {
 }
 
 func runTopicBind(cmd *cobra.Command, pattern, queue string) error {
-	return topicCommandNotImplemented("topic bind")
+	conn, _, err := connect(cmd)
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	defer conn.Close(ctx)
+
+	_, err = conn.Conn.Exec(ctx, "SELECT pgmq.bind_topic($1::text, $2::text);", pattern, queue)
+	if err != nil {
+		return dbErrorForTopicQueue(err, queue)
+	}
+
+	return outputString(cmd, "topic bound")
 }
