@@ -16,7 +16,17 @@ limitations under the License.
 
 package commands
 
-import "github.com/spf13/cobra"
+import (
+	"context"
+
+	"github.com/spf13/cobra"
+)
+
+type topicRouteRecord struct {
+	Pattern       string `json:"pattern"`
+	QueueName     string `json:"queue_name"`
+	CompiledRegex string `json:"compiled_regex"`
+}
 
 func TopicTestCmd() *cobra.Command {
 	cmd := &cobra.Command{
@@ -32,5 +42,43 @@ func TopicTestCmd() *cobra.Command {
 }
 
 func runTopicTest(cmd *cobra.Command, routingKey string) error {
-	return topicCommandNotImplemented("topic test")
+	conn, _, err := connect(cmd)
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	defer conn.Close(ctx)
+
+	rows, err := queryRows(ctx, conn, "SELECT pattern, queue_name, compiled_regex FROM pgmq.test_routing($1::text);", routingKey)
+	if err != nil {
+		return dbErrorForTopic(err)
+	}
+	defer rows.Close()
+
+	var records []topicRouteRecord
+	for rows.Next() {
+		var rec topicRouteRecord
+		if err := rows.Scan(&rec.Pattern, &rec.QueueName, &rec.CompiledRegex); err != nil {
+			return dbError(err)
+		}
+		records = append(records, rec)
+	}
+	if rows.Err() != nil {
+		return dbErrorForTopic(rows.Err())
+	}
+
+	return renderTopicRouteOutput(cmd, records)
+}
+
+func renderTopicRouteOutput(cmd *cobra.Command, records []topicRouteRecord) error {
+	headers := []string{"pattern", "queue_name", "compiled_regex"}
+	tableRows := make([][]string, 0, len(records))
+	for _, rec := range records {
+		tableRows = append(tableRows, []string{
+			rec.Pattern,
+			rec.QueueName,
+			rec.CompiledRegex,
+		})
+	}
+	return renderOutput(cmd, headers, tableRows, records, "no matching topic bindings")
 }

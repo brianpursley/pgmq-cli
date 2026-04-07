@@ -17,8 +17,11 @@ limitations under the License.
 package commands
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -75,5 +78,100 @@ func TestTopicBindingNotFoundError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `queue "audit"`) {
 		t.Fatalf("expected queue in error, got %q", err.Error())
+	}
+}
+
+func TestRenderTopicBindingOutputTable(t *testing.T) {
+	cmd := &cobra.Command{Use: "topic list"}
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetIn(&bytes.Buffer{})
+	cmd.Flags().StringP("output", "o", "table", "Output format")
+	_ = cmd.Flags().Set("output", "table")
+
+	records := []topicBindingRecord{{
+		Pattern:       "logs.#",
+		QueueName:     "all_logs",
+		BoundAt:       time.Date(2026, 4, 7, 12, 0, 0, 0, time.UTC),
+		CompiledRegex: `^logs\..*$`,
+	}}
+
+	if err := renderTopicBindingOutput(cmd, records); err != nil {
+		t.Fatalf("renderTopicBindingOutput error: %v", err)
+	}
+
+	out := cmd.OutOrStdout().(*bytes.Buffer).String()
+	for _, expected := range []string{"pattern", "queue_name", "bound_at", "compiled_regex", "logs.#", "all_logs", "2026-04-07T12:00:00Z", `^logs\..*$`} {
+		if !strings.Contains(out, expected) {
+			t.Fatalf("expected table output to contain %q, got %q", expected, out)
+		}
+	}
+}
+
+func TestRenderTopicBindingOutputEmptyJSON(t *testing.T) {
+	cmd := &cobra.Command{Use: "topic list"}
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetIn(&bytes.Buffer{})
+	cmd.Flags().StringP("output", "o", "table", "Output format")
+	_ = cmd.Flags().Set("output", "json")
+
+	if err := renderTopicBindingOutput(cmd, []topicBindingRecord{}); err != nil {
+		t.Fatalf("renderTopicBindingOutput empty json error: %v", err)
+	}
+
+	var arr []any
+	if err := json.Unmarshal(cmd.OutOrStdout().(*bytes.Buffer).Bytes(), &arr); err != nil {
+		t.Fatalf("expected empty json array, got %v", err)
+	}
+	if len(arr) != 0 {
+		t.Fatalf("expected empty array, got %#v", arr)
+	}
+}
+
+func TestRenderTopicRouteOutputTable(t *testing.T) {
+	cmd := &cobra.Command{Use: "topic test"}
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetIn(&bytes.Buffer{})
+	cmd.Flags().StringP("output", "o", "table", "Output format")
+	_ = cmd.Flags().Set("output", "table")
+
+	records := []topicRouteRecord{{
+		Pattern:       "logs.*.error",
+		QueueName:     "error_logs",
+		CompiledRegex: `^logs\.[^.]+\.error$`,
+	}}
+
+	if err := renderTopicRouteOutput(cmd, records); err != nil {
+		t.Fatalf("renderTopicRouteOutput error: %v", err)
+	}
+
+	out := cmd.OutOrStdout().(*bytes.Buffer).String()
+	for _, expected := range []string{"pattern", "queue_name", "compiled_regex", "logs.*.error", "error_logs", `^logs\.[^.]+\.error$`} {
+		if !strings.Contains(out, expected) {
+			t.Fatalf("expected table output to contain %q, got %q", expected, out)
+		}
+	}
+}
+
+func TestRenderTopicRouteOutputEmptyJSON(t *testing.T) {
+	cmd := &cobra.Command{Use: "topic test"}
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetErr(&bytes.Buffer{})
+	cmd.SetIn(&bytes.Buffer{})
+	cmd.Flags().StringP("output", "o", "table", "Output format")
+	_ = cmd.Flags().Set("output", "json")
+
+	if err := renderTopicRouteOutput(cmd, []topicRouteRecord{}); err != nil {
+		t.Fatalf("renderTopicRouteOutput empty json error: %v", err)
+	}
+
+	var arr []any
+	if err := json.Unmarshal(cmd.OutOrStdout().(*bytes.Buffer).Bytes(), &arr); err != nil {
+		t.Fatalf("expected empty json array, got %v", err)
+	}
+	if len(arr) != 0 {
+		t.Fatalf("expected empty array, got %#v", arr)
 	}
 }
