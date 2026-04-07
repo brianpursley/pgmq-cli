@@ -7,13 +7,16 @@ A command-line tool to manage [PGMQ (Postgres Message Queue)](https://github.com
 - Initialize PGMQ extension
 - Create, list, and drop queues
 - Send and read messages
+- Topic routing with bind, unbind, list, test, and send commands
 - Archive, delete, and purge messages
 - Table or JSON output
 - Config-based server selection
 
 ## Requirements
 
-- Postgres with the PGMQ extension available (version 1.7.0 or later)
+- Postgres with the PGMQ extension available
+- Queue management and queue message commands require `pgmq` 1.7.0 or later
+- Topic routing commands require `pgmq` 1.11.0 or later
 
 ## Installation
 
@@ -145,6 +148,41 @@ pgmq send MyQueue '{"foo":"bar"}' --headers '{"x-pgmq-group":"user123"}'
 pgmq send MyQueue '{"foo":"bar"}' --delay 5
 pgmq send MyQueue '{"foo":"bar"}' --delay-until 2025-01-01T12:00:00Z
 ```
+
+### `pgmq topic`
+
+Manage topic routing. These commands require `pgmq` 1.11.0 or later.
+
+Topic patterns use dot-separated segments:
+
+- `*` matches exactly one segment
+- `#` matches zero or more segments
+
+Examples:
+
+```sh
+pgmq topic bind 'logs.#' all_logs
+pgmq topic bind 'logs.*.error' error_logs
+pgmq topic bind 'logs.api.error' api_errors
+
+pgmq topic list
+pgmq topic list api_errors
+
+pgmq topic test 'logs.api.error'
+
+pgmq topic send 'logs.api.error' '{"message":"API failed"}'
+pgmq topic send 'logs.api.error' '{"message":"API failed"}' --headers '{"priority":"high"}'
+pgmq topic send 'logs.api.error' '{"message":"API failed"}' --delay 5
+pgmq topic send 'logs.api.error' '{"message":"API failed"}' --delay-until 2025-01-01T12:00:00Z
+
+pgmq topic unbind 'logs.api.error' api_errors
+```
+
+Notes:
+
+- `pgmq topic list`, `pgmq topic test`, and `pgmq topic send` support `-o json`
+- `pgmq topic send -o json` returns an array of `{queue_name, msg_id}` objects
+- If a routing key matches no bindings, `pgmq topic send -o json` returns `[]`
 
 ### `pgmq read`
 
