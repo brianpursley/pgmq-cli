@@ -117,6 +117,28 @@ func TestDBErrorForQueue(t *testing.T) {
 	assertExitCode(t, err, errs.ExitError)
 }
 
+func TestDBErrorForTopic(t *testing.T) {
+	err := dbErrorForTopic(&pgconn.PgError{Code: "42883", Message: "function does not exist"})
+	assertExitCode(t, err, errs.ExitError)
+	if !strings.Contains(err.Error(), "topic routing functions not found") {
+		t.Fatalf("expected topic routing message, got %q", err.Error())
+	}
+}
+
+func TestDBErrorForTopicQueue(t *testing.T) {
+	err := dbErrorForTopicQueue(&pgconn.PgError{Code: "42P01", Message: "relation does not exist"}, "q1")
+	assertExitCode(t, err, errs.ExitNotFound)
+	if !strings.Contains(err.Error(), "q1") {
+		t.Fatalf("expected queue name in error, got %q", err.Error())
+	}
+
+	err = dbErrorForTopicQueue(&pgconn.PgError{Code: "42883", Message: "function does not exist"}, "q1")
+	assertExitCode(t, err, errs.ExitError)
+	if !strings.Contains(err.Error(), "topic routing functions not found") {
+		t.Fatalf("expected topic routing message, got %q", err.Error())
+	}
+}
+
 func TestOutputJSONByQtyEmpty(t *testing.T) {
 	cmd := &cobra.Command{Use: "pgmq"}
 	cmd.SetOut(&bytes.Buffer{})

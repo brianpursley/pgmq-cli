@@ -91,3 +91,10 @@ func TestRootIncludesVersionCommand(t *testing.T) {
 		t.Fatalf("expected version command to be registered: %v", err)
 	}
 }
+
+func TestRootIncludesTopicCommand(t *testing.T) {
+	root := NewRootCmd()
+	if _, _, err := root.Find([]string{"topic"}); err != nil {
+		t.Fatalf("expected topic command to be registered: %v", err)
+	}
+}
