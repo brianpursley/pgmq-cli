@@ -19,7 +19,9 @@ A command-line tool to manage [PGMQ (Postgres Message Queue)](https://github.com
 
 ### Prebuilt binaries
 
-Download the latest release for your platform from the [releases page](https://github.com/brianpursley/pgmq-cli/releases)
+Download the latest release for your platform from the [releases page](https://github.com/brianpursley/pgmq-cli/releases).
+
+*(If you encounter problems running the downloaded binary check out the [Frequently Asked Questions section](#frequently-asked-questions) below)*
 
 ### Build from source
 
@@ -228,3 +230,13 @@ The `pgmq pop` command supports `-o message` to output only the raw message JSON
 - `1`: Server/SQL error
 - `2`: Invalid arguments / usage
 - `3`: Not found (e.g., queue missing)
+
+## Frequently Asked Questions
+
+### Why do I get an error saying `"pgmq" cannot be opened because the developer cannot be verified` on macOS?
+
+This is a common issue with unsigned binaries on macOS. To bypass this, you can remove the quarantine attribute from the binary:
+
+```sh
+xattr -d com.apple.quarantine pgmq
+```
