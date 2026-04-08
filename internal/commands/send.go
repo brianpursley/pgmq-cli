@@ -95,15 +95,15 @@ func runSend(cmd *cobra.Command, queue, message string) error {
 	var rows rowsScanner
 	switch {
 	case headersStr != "" && delayAtStr != "":
-		rows, err = queryRows(ctx, conn, "SELECT pgmq.send($1::text, $2::jsonb, $3::jsonb, $4) AS msg_id;", queue, msg, headers, delayAt)
+		rows, err = queryRows(ctx, conn, "SELECT pgmq.send($1::text, $2::jsonb, $3::jsonb, $4::timestamptz) AS msg_id;", queue, msg, headers, delayAt)
 	case headersStr != "" && delaySeconds > 0:
-		rows, err = queryRows(ctx, conn, "SELECT pgmq.send($1::text, $2::jsonb, $3::jsonb, $4) AS msg_id;", queue, msg, headers, delaySeconds)
+		rows, err = queryRows(ctx, conn, "SELECT pgmq.send($1::text, $2::jsonb, $3::jsonb, $4::integer) AS msg_id;", queue, msg, headers, delaySeconds)
 	case headersStr != "":
 		rows, err = queryRows(ctx, conn, "SELECT pgmq.send($1::text, $2::jsonb, $3::jsonb) AS msg_id;", queue, msg, headers)
 	case delayAtStr != "":
-		rows, err = queryRows(ctx, conn, "SELECT pgmq.send($1::text, $2::jsonb, $3) AS msg_id;", queue, msg, delayAt)
+		rows, err = queryRows(ctx, conn, "SELECT pgmq.send($1::text, $2::jsonb, $3::timestamptz) AS msg_id;", queue, msg, delayAt)
 	case delaySeconds > 0:
-		rows, err = queryRows(ctx, conn, "SELECT pgmq.send($1::text, $2::jsonb, $3) AS msg_id;", queue, msg, delaySeconds)
+		rows, err = queryRows(ctx, conn, "SELECT pgmq.send($1::text, $2::jsonb, $3::integer) AS msg_id;", queue, msg, delaySeconds)
 	default:
 		rows, err = queryRows(ctx, conn, "SELECT pgmq.send($1::text, $2::jsonb) AS msg_id;", queue, msg)
 	}
