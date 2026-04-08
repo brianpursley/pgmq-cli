@@ -134,6 +134,25 @@ func TestInitAndCreate(t *testing.T) {
 		t.Fatalf("expected send IDs, got %q", out)
 	}
 
+	out, errOut, code = runCmd("send", "--config", cfgPath, "--server", "DevServer", "test_queue", `{"hello":"delayed"}`, "--delay", "5", "-o", "json")
+	if code != 0 {
+		t.Fatalf("send with delay failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	var delayedIDs []int64
+	if err := json.Unmarshal([]byte(out), &delayedIDs); err != nil || len(delayedIDs) == 0 {
+		t.Fatalf("expected delayed send IDs, got %q", out)
+	}
+
+	delayUntil := time.Now().Add(5 * time.Minute).UTC().Format(time.RFC3339)
+	out, errOut, code = runCmd("send", "--config", cfgPath, "--server", "DevServer", "test_queue", `{"hello":"delay-until"}`, "--delay-until", delayUntil, "-o", "json")
+	if code != 0 {
+		t.Fatalf("send with delay-until failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	var delayedUntilIDs []int64
+	if err := json.Unmarshal([]byte(out), &delayedUntilIDs); err != nil || len(delayedUntilIDs) == 0 {
+		t.Fatalf("expected delay-until send IDs, got %q", out)
+	}
+
 	out, errOut, code = runCmd("read", "--config", cfgPath, "--server", "DevServer", "test_queue", "--vt", "30", "--qty", "1", "-o", "json")
 	if code != 0 {
 		t.Fatalf("read failed: code=%d stdout=%q stderr=%q", code, out, errOut)
