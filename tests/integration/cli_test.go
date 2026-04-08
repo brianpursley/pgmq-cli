@@ -30,9 +30,33 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
+
+type topicBindingResult struct {
+	Pattern       string    `json:"pattern"`
+	QueueName     string    `json:"queue_name"`
+	BoundAt       time.Time `json:"bound_at"`
+	CompiledRegex string    `json:"compiled_regex"`
+}
+
+type topicRouteResult struct {
+	Pattern       string `json:"pattern"`
+	QueueName     string `json:"queue_name"`
+	CompiledRegex string `json:"compiled_regex"`
+}
+
+type topicSendResult struct {
+	QueueName string `json:"queue_name"`
+	MsgID     int64  `json:"msg_id"`
+}
+
+type queueReadResult struct {
+	Message map[string]any `json:"message"`
+	Headers map[string]any `json:"headers"`
+}
 
 func TestInitAndCreate(t *testing.T) {
 	ctx := context.Background()
@@ -323,12 +347,219 @@ func TestInitAndCreate(t *testing.T) {
 	}
 }
 
+func TestTopicRouting(t *testing.T) {
+	ctx := context.Background()
+
+	container, host, port := startPGMQContainer(t, ctx)
+	t.Cleanup(func() {
+		_ = container.Terminate(ctx)
+	})
+
+	bin := buildBinary(t)
+	home := setupHome(t, host, port)
+	cfgPath := filepath.Join(home, ".pgmq", "config.json")
+
+	out, errOut, code := runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "init")
+	if code != 0 {
+		t.Fatalf("init failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if !topicRoutingSupported(t, host, port) {
+		t.Skip("topic routing requires pgmq 1.11.0 or later")
+	}
+
+	for _, queue := range []string{"all_logs", "error_logs", "api_errors"} {
+		out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "create", queue)
+		if code != 0 {
+			t.Fatalf("create %s failed: code=%d stdout=%q stderr=%q", queue, code, out, errOut)
+		}
+	}
+
+	bindings := []struct {
+		pattern string
+		queue   string
+	}{
+		{pattern: "logs.#", queue: "all_logs"},
+		{pattern: "logs.*.error", queue: "error_logs"},
+		{pattern: "logs.api.error", queue: "api_errors"},
+	}
+	for _, binding := range bindings {
+		out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "topic", "bind", binding.pattern, binding.queue)
+		if code != 0 {
+			t.Fatalf("topic bind %s -> %s failed: code=%d stdout=%q stderr=%q", binding.pattern, binding.queue, code, out, errOut)
+		}
+		if !strings.Contains(out, "topic bound") {
+			t.Fatalf("unexpected topic bind output: %q", out)
+		}
+	}
+
+	out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "topic", "list", "-o", "json")
+	if code != 0 {
+		t.Fatalf("topic list all failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	var allBindings []topicBindingResult
+	if err := json.Unmarshal([]byte(out), &allBindings); err != nil {
+		t.Fatalf("expected topic list json array, got %q", out)
+	}
+	if len(allBindings) != 3 {
+		t.Fatalf("expected 3 topic bindings, got %#v", allBindings)
+	}
+
+	out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "topic", "list", "api_errors", "-o", "json")
+	if code != 0 {
+		t.Fatalf("topic list queue failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	var apiBindings []topicBindingResult
+	if err := json.Unmarshal([]byte(out), &apiBindings); err != nil {
+		t.Fatalf("expected topic list queue json array, got %q", out)
+	}
+	if len(apiBindings) != 1 || apiBindings[0].Pattern != "logs.api.error" || apiBindings[0].QueueName != "api_errors" {
+		t.Fatalf("unexpected api_errors bindings: %#v", apiBindings)
+	}
+
+	out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "topic", "test", "logs.api.error", "-o", "json")
+	if code != 0 {
+		t.Fatalf("topic test failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	var routed []topicRouteResult
+	if err := json.Unmarshal([]byte(out), &routed); err != nil {
+		t.Fatalf("expected topic test json array, got %q", out)
+	}
+	if len(routed) != 3 {
+		t.Fatalf("expected 3 matching routes, got %#v", routed)
+	}
+	gotQueues := map[string]bool{}
+	gotPatterns := map[string]bool{}
+	for _, route := range routed {
+		gotQueues[route.QueueName] = true
+		gotPatterns[route.Pattern] = true
+	}
+	for _, queue := range []string{"all_logs", "error_logs", "api_errors"} {
+		if !gotQueues[queue] {
+			t.Fatalf("expected routed queues to include %q, got %#v", queue, routed)
+		}
+	}
+	for _, pattern := range []string{"logs.#", "logs.*.error", "logs.api.error"} {
+		if !gotPatterns[pattern] {
+			t.Fatalf("expected routed patterns to include %q, got %#v", pattern, routed)
+		}
+	}
+
+	out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "topic", "send", "logs.api.error", `{"message":"first"}`, "-o", "json")
+	if code != 0 {
+		t.Fatalf("topic send failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	var firstSend []topicSendResult
+	if err := json.Unmarshal([]byte(out), &firstSend); err != nil {
+		t.Fatalf("expected topic send json array, got %q", out)
+	}
+	if len(firstSend) != 3 {
+		t.Fatalf("expected 3 topic send results, got %#v", firstSend)
+	}
+	gotSendQueues := map[string]bool{}
+	for _, sent := range firstSend {
+		gotSendQueues[sent.QueueName] = true
+		if sent.MsgID <= 0 {
+			t.Fatalf("expected positive msg_id, got %#v", firstSend)
+		}
+	}
+	for _, queue := range []string{"all_logs", "error_logs", "api_errors"} {
+		if !gotSendQueues[queue] {
+			t.Fatalf("expected send results to include %q, got %#v", queue, firstSend)
+		}
+	}
+
+	for _, queue := range []string{"all_logs", "error_logs", "api_errors"} {
+		out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "read", queue, "--vt", "30", "--qty", "1", "-o", "json")
+		if code != 0 {
+			t.Fatalf("read %s failed: code=%d stdout=%q stderr=%q", queue, code, out, errOut)
+		}
+		var rec queueReadResult
+		if err := json.Unmarshal([]byte(out), &rec); err != nil {
+			t.Fatalf("expected read json object, got %q", out)
+		}
+		if rec.Message["message"] != "first" {
+			t.Fatalf("expected first message in %s, got %#v", queue, rec.Message)
+		}
+	}
+
+	out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "topic", "test", "orders.created", "-o", "json")
+	if code != 0 {
+		t.Fatalf("topic test unmatched failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	var unmatchedRoutes []any
+	if err := json.Unmarshal([]byte(out), &unmatchedRoutes); err != nil || len(unmatchedRoutes) != 0 {
+		t.Fatalf("expected empty route result, got %q", out)
+	}
+
+	out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "topic", "send", "orders.created", `{"message":"ignored"}`, "-o", "json")
+	if code != 0 {
+		t.Fatalf("topic send unmatched failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	var unmatchedSend []any
+	if err := json.Unmarshal([]byte(out), &unmatchedSend); err != nil || len(unmatchedSend) != 0 {
+		t.Fatalf("expected empty send result, got %q", out)
+	}
+
+	out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "topic", "unbind", "logs.api.error", "api_errors")
+	if code != 0 {
+		t.Fatalf("topic unbind failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if !strings.Contains(out, "topic unbound") {
+		t.Fatalf("unexpected topic unbind output: %q", out)
+	}
+
+	out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "topic", "send", "logs.api.error", `{"message":"second"}`, "-o", "json")
+	if code != 0 {
+		t.Fatalf("topic send after unbind failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	var secondSend []topicSendResult
+	if err := json.Unmarshal([]byte(out), &secondSend); err != nil {
+		t.Fatalf("expected topic send json array after unbind, got %q", out)
+	}
+	if len(secondSend) != 2 {
+		t.Fatalf("expected 2 topic send results after unbind, got %#v", secondSend)
+	}
+	gotSecondQueues := map[string]bool{}
+	for _, sent := range secondSend {
+		gotSecondQueues[sent.QueueName] = true
+	}
+	if !gotSecondQueues["all_logs"] || !gotSecondQueues["error_logs"] || gotSecondQueues["api_errors"] {
+		t.Fatalf("unexpected queues after unbind: %#v", secondSend)
+	}
+
+	for _, queue := range []string{"all_logs", "error_logs"} {
+		out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "read", queue, "--vt", "30", "--qty", "1", "-o", "json")
+		if code != 0 {
+			t.Fatalf("read %s after unbind failed: code=%d stdout=%q stderr=%q", queue, code, out, errOut)
+		}
+		var rec queueReadResult
+		if err := json.Unmarshal([]byte(out), &rec); err != nil {
+			t.Fatalf("expected read json object after unbind, got %q", out)
+		}
+		if rec.Message["message"] != "second" {
+			t.Fatalf("expected second message in %s, got %#v", queue, rec.Message)
+		}
+	}
+
+	out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "read", "api_errors", "--vt", "30", "--qty", "1", "-o", "json")
+	if code != 0 {
+		t.Fatalf("read api_errors after unbind failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	var apiRead any
+	if err := json.Unmarshal([]byte(out), &apiRead); err != nil {
+		t.Fatalf("expected read api_errors json null, got %q", out)
+	}
+	if apiRead != nil {
+		t.Fatalf("expected no message in api_errors after unbind, got %#v", apiRead)
+	}
+}
+
 func startPGMQContainer(t *testing.T, ctx context.Context) (testcontainers.Container, string, string) {
 	t.Helper()
 
 	image := os.Getenv("PGMQ_TEST_IMAGE")
 	if image == "" {
-		image = "ghcr.io/pgmq/pg17-pgmq:v1.10.0"
+		image = "ghcr.io/pgmq/pg17-pgmq:v1.11.0"
 	}
 
 	req := testcontainers.ContainerRequest{
@@ -396,6 +627,43 @@ func setupHome(t *testing.T, host, port string) string {
 		t.Fatalf("write config: %v", err)
 	}
 	return home
+}
+
+func runCLICommand(t *testing.T, bin, home string, args ...string) (string, string, int) {
+	t.Helper()
+
+	cmd := exec.Command(bin, args...)
+	cmd.Env = append(os.Environ(), "HOME="+home)
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
+		return stdout.String(), stderr.String(), 0
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return stdout.String(), stderr.String(), exitErr.ExitCode()
+	}
+	t.Fatalf("command failed to run: %v", err)
+	return "", "", -1
+}
+
+func topicRoutingSupported(t *testing.T, host, port string) bool {
+	t.Helper()
+
+	ctx := context.Background()
+	connStr := fmt.Sprintf("host=%s port=%s user=postgres password=postgres dbname=pgmq sslmode=disable", host, port)
+	conn, err := pgx.Connect(ctx, connStr)
+	if err != nil {
+		t.Fatalf("connect for topic capability check: %v", err)
+	}
+	defer conn.Close(ctx)
+
+	var supported bool
+	if err := conn.QueryRow(ctx, "SELECT to_regprocedure('pgmq.bind_topic(text,text)') IS NOT NULL;").Scan(&supported); err != nil {
+		t.Fatalf("topic capability check failed: %v", err)
+	}
+	return supported
 }
 
 func TestSetupHomeUsesProvidedHost(t *testing.T) {
