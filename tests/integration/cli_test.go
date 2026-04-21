@@ -58,6 +58,11 @@ type queueReadResult struct {
 	Headers map[string]any `json:"headers"`
 }
 
+type extensionStatusResult struct {
+	Initialized bool    `json:"initialized"`
+	Version     *string `json:"version"`
+}
+
 func TestInitAndCreate(t *testing.T) {
 	ctx := context.Background()
 
@@ -88,15 +93,31 @@ func TestInitAndCreate(t *testing.T) {
 		return "", "", -1
 	}
 
-	out, errOut, code := runCmd("init", "--config", cfgPath, "--server", "DevServer")
+	out, errOut, code := runCmd("extension", "status", "--config", cfgPath, "--server", "DevServer", "-o", "json")
 	if code != 0 {
-		t.Fatalf("init failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+		t.Fatalf("extension status before init failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	var statusBefore extensionStatusResult
+	if err := json.Unmarshal([]byte(out), &statusBefore); err != nil {
+		t.Fatalf("expected extension status json before init, got %q", out)
+	}
+	if statusBefore.Initialized {
+		if statusBefore.Version == nil || strings.TrimSpace(*statusBefore.Version) == "" {
+			t.Fatalf("expected initialized extension status before init to include a non-empty version, got %#v", statusBefore)
+		}
+	} else if statusBefore.Version != nil {
+		t.Fatalf("expected uninitialized extension status before init to omit version, got %#v", statusBefore)
+	}
+
+	out, errOut, code = runCmd("extension", "init", "--config", cfgPath, "--server", "DevServer")
+	if code != 0 {
+		t.Fatalf("extension init failed: code=%d stdout=%q stderr=%q", code, out, errOut)
 	}
 	if !strings.Contains(out, "extension initialized") && !strings.Contains(out, "extension already initialized") {
-		t.Fatalf("unexpected init output: %q", out)
+		t.Fatalf("unexpected extension init output: %q", out)
 	}
 	if !strings.Contains(strings.ToLower(out), "version") {
-		t.Fatalf("expected init output to include extension version, got: %q", out)
+		t.Fatalf("expected extension init output to include extension version, got: %q", out)
 	}
 
 	out, errOut, code = runCmd("create", "--config", cfgPath, "--server", "DevServer", "test_queue")
@@ -138,15 +159,48 @@ func TestInitAndCreate(t *testing.T) {
 		t.Fatalf("list-queues missing queue: %q", out)
 	}
 
-	out, errOut, code = runCmd("init", "--config", cfgPath, "--server", "DevServer", "--check")
+	out, errOut, code = runCmd("extension", "status", "--config", cfgPath, "--server", "DevServer")
 	if code != 0 {
-		t.Fatalf("init --check failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+		t.Fatalf("extension status failed: code=%d stdout=%q stderr=%q", code, out, errOut)
 	}
-	if !strings.Contains(out, "extension is initialized") {
-		t.Fatalf("unexpected check output: %q", out)
+	if !strings.Contains(out, "initialized") || !strings.Contains(out, "true") {
+		t.Fatalf("unexpected status output: %q", out)
 	}
 	if !strings.Contains(strings.ToLower(out), "version") {
-		t.Fatalf("expected init --check output to include extension version, got: %q", out)
+		t.Fatalf("expected extension status output to include extension version, got: %q", out)
+	}
+
+	out, errOut, code = runCmd("extension", "status", "--config", cfgPath, "--server", "DevServer", "-o", "json")
+	if code != 0 {
+		t.Fatalf("extension status json failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	var statusAfter extensionStatusResult
+	if err := json.Unmarshal([]byte(out), &statusAfter); err != nil {
+		t.Fatalf("expected extension status json, got %q", out)
+	}
+	if !statusAfter.Initialized || statusAfter.Version == nil || *statusAfter.Version == "" {
+		t.Fatalf("unexpected extension status json: %#v", statusAfter)
+	}
+
+	out, errOut, code = runCmd("extension", "version", "--config", cfgPath, "--server", "DevServer")
+	if code != 0 {
+		t.Fatalf("extension version failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	extensionVersion := strings.TrimSpace(out)
+	if extensionVersion == "" || strings.Contains(strings.ToLower(extensionVersion), "version") {
+		t.Fatalf("expected plain extension version, got %q", out)
+	}
+
+	out, errOut, code = runCmd("extension", "version", "--config", cfgPath, "--server", "DevServer", "-o", "json")
+	if code != 0 {
+		t.Fatalf("extension version json failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	var extensionVersionJSON string
+	if err := json.Unmarshal([]byte(out), &extensionVersionJSON); err != nil {
+		t.Fatalf("expected extension version json string, got %q", out)
+	}
+	if extensionVersionJSON != extensionVersion {
+		t.Fatalf("expected extension version json %q, got %q", extensionVersion, extensionVersionJSON)
 	}
 
 	out, errOut, code = runCmd("send", "--config", cfgPath, "--server", "DevServer", "test_queue", `{"hello":"world"}`, "-o", "json")
@@ -347,7 +401,7 @@ func TestInitAndCreate(t *testing.T) {
 	}
 }
 
-func TestTopicRouting(t *testing.T) {
+func TestLegacyInitCompatibility(t *testing.T) {
 	ctx := context.Background()
 
 	container, host, port := startPGMQContainer(t, ctx)
@@ -361,7 +415,42 @@ func TestTopicRouting(t *testing.T) {
 
 	out, errOut, code := runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "init")
 	if code != 0 {
-		t.Fatalf("init failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+		t.Fatalf("legacy init failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if !strings.Contains(errOut, "pgmq init is deprecated; use pgmq extension init instead") {
+		t.Fatalf("expected legacy init deprecation warning, got stderr=%q", errOut)
+	}
+	if !strings.Contains(out, "extension initialized") && !strings.Contains(out, "extension already initialized") {
+		t.Fatalf("unexpected legacy init output: %q", out)
+	}
+
+	out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "init", "--check")
+	if code != 0 {
+		t.Fatalf("legacy init --check failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if !strings.Contains(errOut, "pgmq init --check is deprecated; use pgmq extension status instead") {
+		t.Fatalf("expected legacy init --check deprecation warning, got stderr=%q", errOut)
+	}
+	if !strings.Contains(out, "extension is initialized") {
+		t.Fatalf("unexpected legacy init --check output: %q", out)
+	}
+}
+
+func TestTopicRouting(t *testing.T) {
+	ctx := context.Background()
+
+	container, host, port := startPGMQContainer(t, ctx)
+	t.Cleanup(func() {
+		_ = container.Terminate(ctx)
+	})
+
+	bin := buildBinary(t)
+	home := setupHome(t, host, port)
+	cfgPath := filepath.Join(home, ".pgmq", "config.json")
+
+	out, errOut, code := runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "extension", "init")
+	if code != 0 {
+		t.Fatalf("extension init failed: code=%d stdout=%q stderr=%q", code, out, errOut)
 	}
 	if !topicRoutingSupported(t, host, port) {
 		t.Skip("topic routing requires pgmq 1.11.0 or later")
@@ -554,12 +643,145 @@ func TestTopicRouting(t *testing.T) {
 	}
 }
 
+func TestFIFOGroupedReadAndIndexes(t *testing.T) {
+	ctx := context.Background()
+
+	container, host, port := startPGMQContainer(t, ctx)
+	t.Cleanup(func() {
+		_ = container.Terminate(ctx)
+	})
+
+	bin := buildBinary(t)
+	home := setupHome(t, host, port)
+	cfgPath := filepath.Join(home, ".pgmq", "config.json")
+
+	out, errOut, code := runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "extension", "init")
+	if code != 0 {
+		t.Fatalf("extension init failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if !fifoSupported(t, host, port) {
+		t.Skip("FIFO grouped reads require pgmq FIFO functions")
+	}
+
+	out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "create", "fifo_all")
+	if code != 0 {
+		t.Fatalf("create fifo_all failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "fifo", "index", "--all")
+	if code != 0 {
+		t.Fatalf("fifo index --all failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if !strings.Contains(out, "fifo indexes created") {
+		t.Fatalf("unexpected fifo index --all output: %q", out)
+	}
+
+	out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "create", "fifo_single")
+	if code != 0 {
+		t.Fatalf("create fifo_single failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "fifo", "index", "fifo_single")
+	if code != 0 {
+		t.Fatalf("fifo index queue failed: code=%d stdout=%q stderr=%q", code, out, errOut)
+	}
+	if !strings.Contains(out, "fifo index created") {
+		t.Fatalf("unexpected fifo index output: %q", out)
+	}
+
+	tests := []struct {
+		strategy   string
+		queue      string
+		wantLabels []string
+	}{
+		{
+			strategy:   "grouped",
+			queue:      "fifo_grouped",
+			wantLabels: []string{"a1", "a2"},
+		},
+		{
+			strategy:   "grouped-rr",
+			queue:      "fifo_grouped_rr",
+			wantLabels: []string{"a1", "b1"},
+		},
+		{
+			strategy:   "grouped-head",
+			queue:      "fifo_grouped_head",
+			wantLabels: []string{"a1", "b1"},
+		},
+	}
+
+	for _, tt := range tests {
+		out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "create", tt.queue)
+		if code != 0 {
+			t.Fatalf("create %s failed: code=%d stdout=%q stderr=%q", tt.queue, code, out, errOut)
+		}
+
+		messages := []struct {
+			group string
+			label string
+		}{
+			{group: "a", label: "a1"},
+			{group: "a", label: "a2"},
+			{group: "b", label: "b1"},
+			{group: "b", label: "b2"},
+		}
+		for _, msg := range messages {
+			body := fmt.Sprintf(`{"label":%q}`, msg.label)
+			headers := fmt.Sprintf(`{"x-pgmq-group":%q}`, msg.group)
+			out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "send", tt.queue, body, "--headers", headers, "-o", "json")
+			if code != 0 {
+				t.Fatalf("send %s to %s failed: code=%d stdout=%q stderr=%q", msg.label, tt.queue, code, out, errOut)
+			}
+		}
+
+		out, errOut, code = runCLICommand(t, bin, home, "--config", cfgPath, "--server", "DevServer", "read", tt.queue, "--vt", "30", "--qty", "2", "--strategy", tt.strategy, "-o", "json")
+		if code != 0 {
+			t.Fatalf("read %s failed: code=%d stdout=%q stderr=%q", tt.strategy, code, out, errOut)
+		}
+		var records []queueReadResult
+		if err := json.Unmarshal([]byte(out), &records); err != nil {
+			t.Fatalf("expected read json array for %s, got %q", tt.strategy, out)
+		}
+		if len(records) != len(tt.wantLabels) {
+			t.Fatalf("expected %d %s records, got %#v", len(tt.wantLabels), tt.strategy, records)
+		}
+
+		gotLabels := make([]string, 0, len(records))
+		for _, rec := range records {
+			label, ok := rec.Message["label"].(string)
+			if !ok {
+				t.Fatalf("expected string label in %s record, got %#v", tt.strategy, rec.Message)
+			}
+			gotLabels = append(gotLabels, label)
+		}
+		if !sameStringElements(gotLabels, tt.wantLabels) {
+			t.Fatalf("unexpected %s labels: got %v want %v", tt.strategy, gotLabels, tt.wantLabels)
+		}
+	}
+}
+
+func sameStringElements(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	counts := map[string]int{}
+	for _, item := range got {
+		counts[item]++
+	}
+	for _, item := range want {
+		counts[item]--
+		if counts[item] < 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func startPGMQContainer(t *testing.T, ctx context.Context) (testcontainers.Container, string, string) {
 	t.Helper()
 
 	image := os.Getenv("PGMQ_TEST_IMAGE")
 	if image == "" {
-		image = "ghcr.io/pgmq/pg17-pgmq:v1.11.0"
+		image = "ghcr.io/pgmq/pg17-pgmq:v1.11.1"
 	}
 
 	req := testcontainers.ContainerRequest{
@@ -662,6 +884,29 @@ func topicRoutingSupported(t *testing.T, host, port string) bool {
 	var supported bool
 	if err := conn.QueryRow(ctx, "SELECT to_regprocedure('pgmq.bind_topic(text,text)') IS NOT NULL;").Scan(&supported); err != nil {
 		t.Fatalf("topic capability check failed: %v", err)
+	}
+	return supported
+}
+
+func fifoSupported(t *testing.T, host, port string) bool {
+	t.Helper()
+
+	ctx := context.Background()
+	connStr := fmt.Sprintf("host=%s port=%s user=postgres password=postgres dbname=pgmq sslmode=disable", host, port)
+	conn, err := pgx.Connect(ctx, connStr)
+	if err != nil {
+		t.Fatalf("connect for FIFO capability check: %v", err)
+	}
+	defer conn.Close(ctx)
+
+	var supported bool
+	if err := conn.QueryRow(ctx, `SELECT
+		to_regprocedure('pgmq.read_grouped(text,integer,integer)') IS NOT NULL
+		AND to_regprocedure('pgmq.read_grouped_rr(text,integer,integer)') IS NOT NULL
+		AND to_regprocedure('pgmq.read_grouped_head(text,integer,integer)') IS NOT NULL
+		AND to_regprocedure('pgmq.create_fifo_index(text)') IS NOT NULL
+		AND to_regprocedure('pgmq.create_fifo_indexes_all()') IS NOT NULL;`).Scan(&supported); err != nil {
+		t.Fatalf("FIFO capability check failed: %v", err)
 	}
 	return supported
 }

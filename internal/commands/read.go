@@ -19,6 +19,8 @@ package commands
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -35,6 +37,20 @@ type readRecord struct {
 	Headers    json.RawMessage `json:"headers"`
 }
 
+const (
+	readStrategyStandard    = "standard"
+	readStrategyGrouped     = "grouped"
+	readStrategyGroupedRR   = "grouped-rr"
+	readStrategyGroupedHead = "grouped-head"
+)
+
+var readStrategies = []string{
+	readStrategyStandard,
+	readStrategyGrouped,
+	readStrategyGroupedRR,
+	readStrategyGroupedHead,
+}
+
 func ReadCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "read <queue>",
@@ -46,6 +62,8 @@ func ReadCmd() *cobra.Command {
 	}
 	cmd.Flags().Int("vt", 30, "Visibility timeout in seconds")
 	cmd.Flags().Int("qty", 1, "Quantity to read")
+	cmd.Flags().String("strategy", readStrategyStandard, "Read strategy: standard, grouped, grouped-rr, or grouped-head")
+	_ = cmd.RegisterFlagCompletionFunc("strategy", readStrategyCompletion)
 	addOutputFlag(cmd, false)
 	cmd.ValidArgsFunction = queueNameCompletion
 	return cmd
@@ -66,6 +84,14 @@ func runRead(cmd *cobra.Command, queue string) error {
 	if qty <= 0 {
 		return errs.NewUsageError("--qty must be >= 1")
 	}
+	strategy, err := cmd.Flags().GetString("strategy")
+	if err != nil {
+		return errs.NewUsageError("failed to read --strategy flag")
+	}
+	readQuery, err := readQueryForStrategy(strategy)
+	if err != nil {
+		return err
+	}
 
 	conn, _, err := connect(cmd)
 	if err != nil {
@@ -74,9 +100,9 @@ func runRead(cmd *cobra.Command, queue string) error {
 	ctx := context.Background()
 	defer conn.Close(ctx)
 
-	rows, err := queryRows(ctx, conn, "SELECT msg_id, read_ct, enqueued_at, vt, message, headers FROM pgmq.read($1::text, $2, $3);", queue, vt, qty)
+	rows, err := queryRows(ctx, conn, readQuery, queue, vt, qty)
 	if err != nil {
-		return dbErrorForQueue(err, queue)
+		return dbErrorForReadStrategy(err, queue, strategy)
 	}
 	defer rows.Close()
 
@@ -91,7 +117,7 @@ func runRead(cmd *cobra.Command, queue string) error {
 		records = append(records, rec)
 	}
 	if rows.Err() != nil {
-		return dbErrorForQueue(rows.Err(), queue)
+		return dbErrorForReadStrategy(rows.Err(), queue, strategy)
 	}
 	if len(records) == 0 {
 		return outputEmptyByQty(cmd, qty, "no messages found")
@@ -111,4 +137,38 @@ func runRead(cmd *cobra.Command, queue string) error {
 		tableRows = append(tableRows, readRecordRow(rec))
 	}
 	return renderOutput(cmd, headers, tableRows, records, "no messages found")
+}
+
+func readQueryForStrategy(strategy string) (string, error) {
+	var functionName string
+	switch strategy {
+	case readStrategyStandard:
+		functionName = "read"
+	case readStrategyGrouped:
+		functionName = "read_grouped"
+	case readStrategyGroupedRR:
+		functionName = "read_grouped_rr"
+	case readStrategyGroupedHead:
+		functionName = "read_grouped_head"
+	default:
+		return "", errs.NewUsageError(fmt.Sprintf("invalid --strategy %q (expected one of: %s)", strategy, strings.Join(readStrategies, ", ")))
+	}
+	return fmt.Sprintf("SELECT msg_id, read_ct, enqueued_at, vt, message, headers FROM pgmq.%s($1::text, $2, $3);", functionName), nil
+}
+
+func dbErrorForReadStrategy(err error, queue, strategy string) error {
+	if strategy != readStrategyStandard {
+		return dbErrorForFIFOQueue(err, queue)
+	}
+	return dbErrorForQueue(err, queue)
+}
+
+func readStrategyCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	out := make([]string, 0, len(readStrategies))
+	for _, strategy := range readStrategies {
+		if toComplete == "" || strings.HasPrefix(strategy, toComplete) {
+			out = append(out, strategy)
+		}
+	}
+	return out, cobra.ShellCompDirectiveNoFileComp
 }
