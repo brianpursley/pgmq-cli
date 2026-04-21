@@ -102,10 +102,7 @@ func runRead(cmd *cobra.Command, queue string) error {
 
 	rows, err := queryRows(ctx, conn, readQuery, queue, vt, qty)
 	if err != nil {
-		if strategy != readStrategyStandard {
-			return dbErrorForFIFOQueue(err, queue)
-		}
-		return dbErrorForQueue(err, queue)
+		return dbErrorForReadStrategy(err, queue, strategy)
 	}
 	defer rows.Close()
 
@@ -120,7 +117,7 @@ func runRead(cmd *cobra.Command, queue string) error {
 		records = append(records, rec)
 	}
 	if rows.Err() != nil {
-		return dbErrorForQueue(rows.Err(), queue)
+		return dbErrorForReadStrategy(rows.Err(), queue, strategy)
 	}
 	if len(records) == 0 {
 		return outputEmptyByQty(cmd, qty, "no messages found")
@@ -157,6 +154,13 @@ func readQueryForStrategy(strategy string) (string, error) {
 		return "", errs.NewUsageError(fmt.Sprintf("invalid --strategy %q (expected one of: %s)", strategy, strings.Join(readStrategies, ", ")))
 	}
 	return fmt.Sprintf("SELECT msg_id, read_ct, enqueued_at, vt, message, headers FROM pgmq.%s($1::text, $2, $3);", functionName), nil
+}
+
+func dbErrorForReadStrategy(err error, queue, strategy string) error {
+	if strategy != readStrategyStandard {
+		return dbErrorForFIFOQueue(err, queue)
+	}
+	return dbErrorForQueue(err, queue)
 }
 
 func readStrategyCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {

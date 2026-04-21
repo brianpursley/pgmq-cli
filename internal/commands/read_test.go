@@ -19,10 +19,12 @@ package commands
 import (
 	"bytes"
 	"reflect"
+	"strings"
 	"testing"
 
 	"pgmq-cli/internal/errs"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/spf13/cobra"
 )
 
@@ -104,5 +106,19 @@ func TestReadStrategyCompletion(t *testing.T) {
 	want := []string{readStrategyGroupedRR}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected filtered completions: got %v want %v", got, want)
+	}
+}
+
+func TestDBErrorForReadStrategy(t *testing.T) {
+	err := dbErrorForReadStrategy(&pgconn.PgError{Code: "42883", Message: "function does not exist"}, "queue", readStrategyStandard)
+	assertExitCode(t, err, errs.ExitError)
+	if !strings.Contains(err.Error(), "pgmq extension init") {
+		t.Fatalf("expected standard read extension init message, got %q", err.Error())
+	}
+
+	err = dbErrorForReadStrategy(&pgconn.PgError{Code: "42883", Message: "function does not exist"}, "queue", readStrategyGrouped)
+	assertExitCode(t, err, errs.ExitError)
+	if !strings.Contains(err.Error(), "FIFO functions not found") {
+		t.Fatalf("expected FIFO read message, got %q", err.Error())
 	}
 }
