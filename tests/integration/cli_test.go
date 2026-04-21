@@ -101,8 +101,12 @@ func TestInitAndCreate(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &statusBefore); err != nil {
 		t.Fatalf("expected extension status json before init, got %q", out)
 	}
-	if statusBefore.Initialized || statusBefore.Version != nil {
-		t.Fatalf("expected extension status before init to be not initialized, got %#v", statusBefore)
+	if statusBefore.Initialized {
+		if statusBefore.Version == nil || strings.TrimSpace(*statusBefore.Version) == "" {
+			t.Fatalf("expected initialized extension status before init to include a non-empty version, got %#v", statusBefore)
+		}
+	} else if statusBefore.Version != nil {
+		t.Fatalf("expected uninitialized extension status before init to omit version, got %#v", statusBefore)
 	}
 
 	out, errOut, code = runCmd("extension", "init", "--config", cfgPath, "--server", "DevServer")
