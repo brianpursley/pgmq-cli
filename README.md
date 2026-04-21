@@ -105,13 +105,16 @@ pgmq server set-default DevServer
 pgmq server unset-default
 ```
 
-### `pgmq init`
+### `pgmq extension`
 
-Initialize the PGMQ extension if needed.
+Manage the PGMQ extension on the selected Postgres server.
 
 ```sh
-pgmq init
-pgmq init --check
+pgmq extension init
+pgmq extension status
+pgmq extension status -o json
+pgmq extension version
+pgmq extension version -o json
 ```
 
 ### `pgmq create`

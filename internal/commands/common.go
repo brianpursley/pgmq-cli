@@ -134,7 +134,7 @@ func dbError(err error) error {
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
 		case "42883":
-			return errs.NewError(errs.ExitError, "pgmq functions not found: is the extension installed? try `pgmq init`")
+			return errs.NewError(errs.ExitError, "pgmq functions not found: is the extension installed? try `pgmq extension init`")
 		case "42P01", "42704":
 			return errs.NewNotFoundError("resource not found")
 		}
@@ -150,7 +150,7 @@ func dbErrorForQueue(err error, queue string) error {
 	if errors.As(err, &pgErr) {
 		switch pgErr.Code {
 		case "42883":
-			return errs.NewError(errs.ExitError, "pgmq functions not found: is the extension installed? try `pgmq init`")
+			return errs.NewError(errs.ExitError, "pgmq functions not found: is the extension installed? try `pgmq extension init`")
 		case "42P01", "42704":
 			return errs.NewNotFoundError(fmt.Sprintf("queue %q not found", queue))
 		}

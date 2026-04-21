@@ -17,8 +17,10 @@ limitations under the License.
 package cli
 
 import (
+	"bytes"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -103,5 +105,84 @@ func TestRootIncludesFIFOCommand(t *testing.T) {
 	root := NewRootCmd()
 	if _, _, err := root.Find([]string{"fifo"}); err != nil {
 		t.Fatalf("expected fifo command to be registered: %v", err)
+	}
+}
+
+func TestRootIncludesExtensionCommand(t *testing.T) {
+	root := NewRootCmd()
+	if _, _, err := root.Find([]string{"extension"}); err != nil {
+		t.Fatalf("expected extension command to be registered: %v", err)
+	}
+}
+
+func TestRootInitCommandHidden(t *testing.T) {
+	root := NewRootCmd()
+	cmd, _, err := root.Find([]string{"init"})
+	if err != nil {
+		t.Fatalf("expected legacy init command to remain executable: %v", err)
+	}
+	if !cmd.Hidden {
+		t.Fatalf("expected legacy init command to be hidden")
+	}
+}
+
+func TestRootHelpHidesInitCommand(t *testing.T) {
+	root := NewRootCmd()
+	out := &bytes.Buffer{}
+	errOut := &bytes.Buffer{}
+	root.SetOut(out)
+	root.SetErr(errOut)
+	root.SetArgs([]string{"--help"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("root help failed: %v", err)
+	}
+	if strings.Contains(out.String(), "\n  init") {
+		t.Fatalf("expected root help not to list hidden init command, got: %s", out.String())
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("expected no stderr for root help, got %q", errOut.String())
+	}
+}
+
+func TestRootInitHelpWorksWithoutDeprecationWarning(t *testing.T) {
+	root := NewRootCmd()
+	out := &bytes.Buffer{}
+	errOut := &bytes.Buffer{}
+	root.SetOut(out)
+	root.SetErr(errOut)
+	root.SetArgs([]string{"init", "--help"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("legacy init help failed: %v", err)
+	}
+	if !strings.Contains(out.String(), "Initialize pgmq extension") {
+		t.Fatalf("expected init help output, got %q", out.String())
+	}
+	if strings.Contains(errOut.String(), "deprecated") {
+		t.Fatalf("expected no deprecation warning for init help, got %q", errOut.String())
+	}
+}
+
+func TestRootExtensionInitRejectsCheckFlag(t *testing.T) {
+	root := NewRootCmd()
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"extension", "init", "--check"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatalf("expected extension init --check to fail")
+	}
+	if !strings.Contains(err.Error(), "unknown flag") {
+		t.Fatalf("expected unknown flag error, got %v", err)
+	}
+}
+
+func TestRootExtensionCheckNotRegistered(t *testing.T) {
+	root := NewRootCmd()
+	cmd, _, err := root.Find([]string{"extension", "check"})
+	if err == nil && cmd.Name() == "check" {
+		t.Fatalf("expected extension check not to be registered")
 	}
 }

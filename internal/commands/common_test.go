@@ -115,6 +115,9 @@ func TestDBErrorForQueue(t *testing.T) {
 
 	err = dbErrorForQueue(&pgconn.PgError{Code: "42883", Message: "function does not exist"}, "q1")
 	assertExitCode(t, err, errs.ExitError)
+	if !strings.Contains(err.Error(), "pgmq extension init") {
+		t.Fatalf("expected extension init suggestion, got %q", err.Error())
+	}
 }
 
 func TestDBErrorForTopic(t *testing.T) {
