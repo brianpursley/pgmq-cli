@@ -61,6 +61,7 @@ func NewRootCmd() *cobra.Command {
 		commands.ServerCmd(),
 		commands.InitCmd(),
 		commands.TopicCmd(),
+		commands.FIFOCmd(),
 		commands.CreateCmd(),
 		commands.DropCmd(),
 		commands.ListCmd(),

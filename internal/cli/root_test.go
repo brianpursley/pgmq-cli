@@ -98,3 +98,10 @@ func TestRootIncludesTopicCommand(t *testing.T) {
 		t.Fatalf("expected topic command to be registered: %v", err)
 	}
 }
+
+func TestRootIncludesFIFOCommand(t *testing.T) {
+	root := NewRootCmd()
+	if _, _, err := root.Find([]string{"fifo"}); err != nil {
+		t.Fatalf("expected fifo command to be registered: %v", err)
+	}
+}

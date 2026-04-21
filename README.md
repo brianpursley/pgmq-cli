@@ -7,6 +7,7 @@ A command-line tool to manage [PGMQ (Postgres Message Queue)](https://github.com
 - Initialize PGMQ extension
 - Create, list, and drop queues
 - Send and read messages
+- FIFO grouped read strategies and FIFO index management
 - Topic routing with bind, unbind, list, test, and send commands
 - Archive, delete, and purge messages
 - Table or JSON output
@@ -17,6 +18,7 @@ A command-line tool to manage [PGMQ (Postgres Message Queue)](https://github.com
 - Postgres with the PGMQ extension available
 - Queue management and queue message commands require `pgmq` 1.7.0 or later
 - Topic routing commands require `pgmq` 1.11.0 or later
+- FIFO grouped read strategies and FIFO index commands require `pgmq` 1.11.1 or later
 
 ## Installation
 
@@ -190,7 +192,28 @@ Read messages with visibility timeout.
 
 ```sh
 pgmq read MyQueue --qty 5
+pgmq read MyQueue --qty 5 --strategy grouped
+pgmq read MyQueue --qty 5 --strategy grouped-rr
+pgmq read MyQueue --qty 5 --strategy grouped-head
 ```
+
+Read strategies:
+
+- `standard`: Use `pgmq.read`, preserving existing read behavior.
+- `grouped`: Use `pgmq.read_grouped` for throughput-oriented FIFO grouped reads.
+- `grouped-rr`: Use `pgmq.read_grouped_rr` for round-robin FIFO grouped reads.
+- `grouped-head`: Use `pgmq.read_grouped_head` to read the head of multiple FIFO groups.
+
+### `pgmq fifo`
+
+Manage FIFO queue features.
+
+```sh
+pgmq fifo index MyQueue
+pgmq fifo index --all
+```
+
+The `index` command creates FIFO indexes for one queue or all existing queues.
 
 ### `pgmq pop`
 

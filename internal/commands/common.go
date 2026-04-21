@@ -184,6 +184,28 @@ func dbErrorForTopicQueue(err error, queue string) error {
 	return dbErrorForQueue(err, queue)
 }
 
+func dbErrorForFIFO(err error) error {
+	if err == nil {
+		return nil
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "42883" {
+		return errs.NewError(errs.ExitError, "FIFO functions not found; ensure the pgmq extension is installed and upgraded to 1.11.1 or later")
+	}
+	return dbError(err)
+}
+
+func dbErrorForFIFOQueue(err error, queue string) error {
+	if err == nil {
+		return nil
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "42883" {
+		return errs.NewError(errs.ExitError, "FIFO functions not found; ensure the pgmq extension is installed and upgraded to 1.11.1 or later")
+	}
+	return dbErrorForQueue(err, queue)
+}
+
 func outputString(cmd *cobra.Command, message string) error {
 	format, err := getStringFlag(cmd, "output")
 	if err == nil && format == "json" {

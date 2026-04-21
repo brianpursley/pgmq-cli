@@ -139,6 +139,31 @@ func TestDBErrorForTopicQueue(t *testing.T) {
 	}
 }
 
+func TestDBErrorForFIFO(t *testing.T) {
+	err := dbErrorForFIFO(&pgconn.PgError{Code: "42883", Message: "function does not exist"})
+	assertExitCode(t, err, errs.ExitError)
+	if !strings.Contains(err.Error(), "FIFO functions not found") {
+		t.Fatalf("expected FIFO functions message, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "1.11.1 or later") {
+		t.Fatalf("expected FIFO version message, got %q", err.Error())
+	}
+}
+
+func TestDBErrorForFIFOQueue(t *testing.T) {
+	err := dbErrorForFIFOQueue(&pgconn.PgError{Code: "42P01", Message: "relation does not exist"}, "q1")
+	assertExitCode(t, err, errs.ExitNotFound)
+	if !strings.Contains(err.Error(), "q1") {
+		t.Fatalf("expected queue name in error, got %q", err.Error())
+	}
+
+	err = dbErrorForFIFOQueue(&pgconn.PgError{Code: "42883", Message: "function does not exist"}, "q1")
+	assertExitCode(t, err, errs.ExitError)
+	if !strings.Contains(err.Error(), "FIFO functions not found") {
+		t.Fatalf("expected FIFO functions message, got %q", err.Error())
+	}
+}
+
 func TestOutputJSONByQtyEmpty(t *testing.T) {
 	cmd := &cobra.Command{Use: "pgmq"}
 	cmd.SetOut(&bytes.Buffer{})
